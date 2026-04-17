@@ -1,20 +1,22 @@
 from config import Config
 import os
-import random
 import yaml
 import pandas as pd
-import pandas as pd
-import os
-import yaml
-import random
 
 # =========================================================
-# CONFIG
+# GLOBAL STATE
 # =========================================================
 
-DF_ALL = pd.read_excel(f'Input/judo+_{Config.TOURNAMENT_CODE}.xlsx', sheet_name=Config.STAGE, header=None).drop([0])
-    
-os.makedirs(Config.output_folder(), exist_ok=True)
+DF_ALL = pd.read_excel(
+    f'Input/judo+_{Config.TOURNAMENT_CODE}.xlsx',
+    sheet_name=Config.STAGE,
+    header=None
+).drop([0])
+
+os.makedirs(Config.aux_output_folder(), exist_ok=True)
+
+group_counter = {"value": 1}
+
 
 # =========================================================
 # HELPERS: EXPORT
@@ -22,17 +24,24 @@ os.makedirs(Config.output_folder(), exist_ok=True)
 
 def export_markdown_report(results):
     """
-    Export one unified Markdown report containing:
-    - metadata
-    - male details
-    - female details
-    - logs / warnings
-    - summaries
+    Export a full tournament draw report in Markdown format.
+
+    This report includes:
+    - Global metadata
+    - Per-gender summaries (Male / Female)
+    - Age tier breakdowns
+    - Validation logs and warnings
+
+    :param results: Dictionary containing processed tournament results
+    :type results: dict
+
+    :return: None
+    :rtype: None
     """
     if Config.STAGE == "B":
-        output_md_file = os.path.join(Config.output_folder(), f"{Config.STAGE}_draw_report.md")
+        output_md_file = os.path.join(Config.aux_output_folder(), f"{Config.STAGE}_draw_report.md")
     elif Config.STAGE == "I":
-        output_md_file = os.path.join(Config.output_folder(), f"{Config.STAGE}_draw_report.md")
+        output_md_file = os.path.join(Config.aux_output_folder(), f"{Config.STAGE}_draw_report.md")
 
     lines = []
 
@@ -139,12 +148,27 @@ def export_markdown_report(results):
 
 def export_groups_to_yaml(grouped_data, sex_label="Unknown"):
     """
-    Export grouped athletes / ungrouped athletes to a YAML file.
+    Export grouped athlete structure into a YAML file.
+
+    The output contains:
+    - Age tiers
+    - Weight classes
+    - Groups (Group1, Group2, ...)
+    - Ungrouped athletes (if any)
+
+    :param grouped_data: Nested dictionary of grouped athletes
+    :type grouped_data: dict
+
+    :param sex_label: Gender label ("Male" or "Female")
+    :type sex_label: str
+
+    :return: None
+    :rtype: None
     """
     if Config.STAGE == "B":
-        output_yaml_file = os.path.join(Config.output_folder(), f"{Config.STAGE}_{sex_label}_grouped_athletes.yaml")
+        output_yaml_file = os.path.join(Config.aux_output_folder(), f"{Config.STAGE}_{sex_label}_grouped_athletes.yaml")
     elif Config.STAGE == "I":
-        output_yaml_file = os.path.join(Config.output_folder(), f"{Config.STAGE}_{sex_label}_grouped_athletes.yaml")
+        output_yaml_file = os.path.join(Config.aux_output_folder(), f"{Config.STAGE}_{sex_label}_grouped_athletes.yaml")
 
     with open(output_yaml_file, "w", encoding="utf-8") as f:
         yaml.safe_dump(
@@ -162,6 +186,19 @@ def export_groups_to_yaml(grouped_data, sex_label="Unknown"):
 # =========================================================
 
 def normalize_gender(value):
+    """
+    Normalize gender values from input dataset.
+
+    Accepted inputs:
+    - M, Male, Masculino
+    - F, Female, Feminino
+
+    :param value: Raw gender value from dataset
+    :type value: any
+
+    :return: Normalized gender ("M", "F") or None if invalid
+    :rtype: str | None
+    """
     if pd.isna(value):
         return None
     g = str(value).strip().upper()
@@ -174,29 +211,43 @@ def normalize_gender(value):
 
 def normalize_tier(value):
     """
-    Normalize plural/singular and casing.
+    Normalize age tier labels into canonical format.
+
+    Example conversions:
+    - "benjamins" → "Benjamim"
+    - "infantis" → "Infantil"
+
+    :param value: Raw tier value
+    :type value: any
+
+    :return: Normalized tier name or None if invalid
+    :rtype: str | None
     """
     if pd.isna(value):
         return None
 
     tier = str(value).strip().lower()
 
-    tier_map = {
-        "benjamim": "Benjamim",
-        "benjamins": "Benjamim",
-        "infantil": "Infantil",
-        "infantis": "Infantil",
-        "iniciado": "Iniciado",
-        "iniciados": "Iniciado"
-    }
-
-    return tier_map.get(tier, None)
+    return Config.TIER_MAP.get(tier, None)
 
 
 def create_subgroup(row, logs):
     """
-    Create AGE_TIER from TIER + BIRTH_YEAR using configurable AGE_RULES.
-    Returns None if invalid, and logs the reason.
+    Assign an AGE_TIER subgroup based on birth year and tier rules.
+
+    This function:
+    - Validates tier
+    - Validates birth year
+    - Matches athlete to AGE_RULES configuration
+
+    :param row: Athlete row from dataframe
+    :type row: pandas.Series
+
+    :param logs: Log collector for validation warnings
+    :type logs: list
+
+    :return: Matched AGE_TIER label or None if invalid
+    :rtype: str | None
     """
     athlete_name = str(row["NAME"]).strip()
 
@@ -242,14 +293,22 @@ def create_subgroup(row, logs):
 
 def process_table(df):
     """
-    Process the raw table:
-    - set column names
-    - normalize gender
-    - create AGE_TIER with validation logs
-    - keep invalid rows out of main draw
-    - return male/female dataframes + logs
-    """
+    Clean and normalize raw tournament input data.
 
+    Steps:
+    - Normalize column names
+    - Validate gender
+    - Create AGE_TIER assignments
+    - Remove invalid rows
+    - Split into male/female datasets
+
+    :param df: Raw input dataframe
+    :type df: pandas.DataFrame
+
+    :return: Tuple containing:
+             (male_dataframe, female_dataframe, logs)
+    :rtype: tuple[pandas.DataFrame, pandas.DataFrame, list]
+    """
     logs = []
 
     # Adjust if your source columns come in a known order
@@ -295,8 +354,24 @@ def process_table(df):
 
 def assign_weight_class(df, bins, labels, logs):
     """
-    Convert WEIGHT to numeric and assign WEIGHT_CLASS.
-    Invalid weights are logged and removed.
+    Assign weight classes to athletes using predefined bins.
+
+    Invalid or missing weights are logged and removed.
+
+    :param df: Athlete dataframe
+    :type df: pandas.DataFrame
+
+    :param bins: Numeric bin edges
+    :type bins: list[float]
+
+    :param labels: Weight class labels
+    :type labels: list[str]
+
+    :param logs: Validation log list
+    :type logs: list
+
+    :return: Cleaned dataframe with WEIGHT_CLASS column
+    :rtype: pandas.DataFrame
     """
     df = df.copy()
 
@@ -426,7 +501,15 @@ def choose_group_sizes(n):
 
 def athlete_to_yaml_dict(row):
     """
-    Convert one athlete row to YAML-friendly dict.
+    Convert a pandas row representing an athlete into a YAML-serializable dictionary.
+
+    This function standardizes athlete data before exporting it to YAML files.
+
+    :param row: Pandas Series containing athlete data.
+    :type row: pandas.Series
+
+    :return: Dictionary representation of an athlete.
+    :rtype: dict
     """
     return {
         "Name": row["NAME"],
@@ -439,9 +522,26 @@ def athlete_to_yaml_dict(row):
 def order_group_same_club_first(group_df, logs=None, age_tier=None, weight_class=None):
     """
     Reorder athletes inside a group so that athletes from duplicated clubs
-    appear first, grouped together.
+    are placed first and grouped together.
 
-    Also optionally logs unavoidable same-club pairings.
+    This helps visualize and highlight same-club conflicts in competition groups.
+
+    Optionally logs occurrences where same-club grouping is unavoidable.
+
+    :param group_df: DataFrame containing athletes in a group.
+    :type group_df: pandas.DataFrame
+
+    :param logs: List used to store validation or warning messages.
+    :type logs: list or None
+
+    :param age_tier: Age category label (used for logging context).
+    :type age_tier: str or None
+
+    :param weight_class: Weight class label (used for logging context).
+    :type weight_class: str or None
+
+    :return: Reordered DataFrame with same-club athletes prioritized.
+    :rtype: pandas.DataFrame
     """
     group_df = group_df.copy().reset_index(drop=True)
 
@@ -477,8 +577,23 @@ def order_group_same_club_first(group_df, logs=None, age_tier=None, weight_class
 
 def pick_group_with_club_mix(pool_df, group_size):
     """
-    Build one group trying to maximize club diversity.
-    Randomized among valid candidates while remaining reproducible.
+    Build a group of athletes while maximizing club diversity.
+
+    Strategy:
+    - Randomly shuffle input pool (deterministic via Config RNG)
+    - Prefer athletes from different clubs
+    - Fall back to any available athlete if needed
+
+    :param pool_df: Available athletes to select from.
+    :type pool_df: pandas.DataFrame
+
+    :param group_size: Number of athletes required in the group.
+    :type group_size: int
+
+    :return: Tuple containing:
+             - selected group DataFrame
+             - remaining pool DataFrame
+    :rtype: tuple[pandas.DataFrame, pandas.DataFrame]
     """
     if len(pool_df) < group_size:
         return pd.DataFrame(), pool_df
@@ -517,15 +632,34 @@ def pick_group_with_club_mix(pool_df, group_size):
     return group_df, remaining_df
 
 
-def build_groups_for_class(class_df, logs, age_tier, weight_class):
+def build_groups_for_class(class_df, logs, age_tier, weight_class, group_counter):
     """
-    Build groups for one AGE_TIER + WEIGHT_CLASS subset.
-    Returns:
-    {
-        "Group1": [...],
-        "Group2": [...],
-        "Ungrouped": [...]
-    }
+    Build competition groups for a single AGE_TIER + WEIGHT_CLASS.
+
+    Groups are created using:
+    - Configurable group size strategy
+    - Club diversity optimization
+    - Reproducible randomness
+
+    :param class_df: Filtered athlete dataframe
+    :type class_df: pandas.DataFrame
+
+    :param logs: Validation log collector
+    :type logs: list
+
+    :param age_tier: Age tier label
+    :type age_tier: str
+
+    :param weight_class: Weight class label
+    :type weight_class: str
+
+    :param group_counter: Shared counter for global group numbering
+    :type group_counter: dict
+
+    :return: Dictionary containing:
+             - Group1, Group2, ...
+             - Optional Ungrouped athletes
+    :rtype: dict
     """
     n = len(class_df)
     result = {}
@@ -565,8 +699,10 @@ def build_groups_for_class(class_df, logs, age_tier, weight_class):
     # Shuffle group order for more visible randomness
     Config.rng().shuffle(groups_list)
 
-    for i, group in enumerate(groups_list, start=1):
-        result[f"Group{i}"] = group
+    for group in groups_list:
+        group_name = f"Group{group_counter['value']}"
+        result[group_name] = group
+        group_counter["value"] += 1
 
     # Leftover (0 or 1)
     if leftover > 0 and not pool_df.empty:
@@ -585,7 +721,34 @@ def build_groups_for_class(class_df, logs, age_tier, weight_class):
 # STEP 5: BUILD FULL GROUPED STRUCTURE
 # =========================================================
 
-def build_grouped_structure(df, logs, sex_label="Unknown"):
+def build_grouped_structure(df, logs, sex_label="Unknown", group_counter=None):
+    """
+    Build hierarchical tournament group structure.
+
+    Structure generated:
+    {
+        Age Tier:
+            Weight Class:
+                Group1: [...]
+                Group2: [...]
+                Ungrouped: [...]
+    }
+
+    :param df: Preprocessed athlete DataFrame.
+    :type df: pandas.DataFrame
+
+    :param logs: List for warnings and validation messages.
+    :type logs: list
+
+    :param sex_label: Gender label ("Male" / "Female").
+    :type sex_label: str
+
+    :param group_counter: Shared counter for unique group numbering.
+    :type group_counter: dict
+
+    :return: Nested dictionary representing grouped tournament structure.
+    :rtype: dict
+    """
     grouped_output = {}
 
     if df.empty:
@@ -612,7 +775,8 @@ def build_grouped_structure(df, logs, sex_label="Unknown"):
                 wc_df,
                 logs=logs,
                 age_tier=age_tier,
-                weight_class=str(weight_class)
+                weight_class=str(weight_class),
+                group_counter=group_counter
             )
 
             grouped_output[age_tier][str(weight_class)] = class_result
@@ -626,7 +790,24 @@ def build_grouped_structure(df, logs, sex_label="Unknown"):
 
 def build_summary_from_grouped(grouped_data, sex_label="Unknown"):
     """
-    Build a separate summary structure from grouped YAML data.
+    Build a statistical summary from grouped tournament data.
+
+    The summary includes:
+    - total athletes input
+    - grouped athletes
+    - ungrouped athletes
+    - validation checks per age tier and weight class
+
+    This function is used for reporting and validation purposes.
+
+    :param grouped_data: Nested grouped structure from build_grouped_structure.
+    :type grouped_data: dict
+
+    :param sex_label: Gender label ("Male" / "Female").
+    :type sex_label: str
+
+    :return: Summary dictionary containing aggregated statistics.
+    :rtype: dict
     """
     total_grouped = 0
     total_ungrouped = 0
@@ -693,19 +874,42 @@ def build_summary_from_grouped(grouped_data, sex_label="Unknown"):
 # STEP 7: FULL PIPELINE FOR ONE GENDER
 # =========================================================
 
-def process_gender_pipeline(df_gender, bins, labels, sex_label, logs):
+def process_gender_pipeline(df_gender, bins, labels, sex_label, logs, group_counter):
     """
-    Full pipeline for one gender:
-    - assign weight class
-    - build groups
-    - build summary
-    - export files
+    Execute full processing pipeline for a single gender.
+
+    Pipeline steps:
+    - Assign weight classes
+    - Build grouped structure
+    - Generate summary statistics
+    - Export YAML output
+
+    :param df_gender: Gender-specific dataframe
+    :type df_gender: pandas.DataFrame
+
+    :param bins: Weight bin configuration
+    :type bins: list[float]
+
+    :param labels: Weight class labels
+    :type labels: list[str]
+
+    :param sex_label: Gender label ("Male"/"Female")
+    :type sex_label: str
+
+    :param logs: Validation logs
+    :type logs: list
+
+    :param group_counter: Global group numbering state
+    :type group_counter: dict
+
+    :return: Tuple (grouped_data, summary_data)
+    :rtype: tuple[dict, dict]
     """
     # Assign weight classes
     df_gender = assign_weight_class(df_gender, bins, labels, logs)
 
     # Build grouped structure
-    grouped_data = build_grouped_structure(df_gender, logs, sex_label=sex_label)
+    grouped_data = build_grouped_structure(df_gender, logs, sex_label=sex_label, group_counter=group_counter)
 
     # Build summary
     summary_data = build_summary_from_grouped(grouped_data, sex_label=sex_label)
@@ -722,11 +926,24 @@ def process_gender_pipeline(df_gender, bins, labels, sex_label, logs):
 
 def run_tournament_draw(df_all):
     """
-    Master function:
-    1) process raw table
-    2) split male/female
-    3) run per-gender pipeline
-    4) return outputs
+    Execute full tournament draw pipeline.
+
+    This is the main entry point of the system.
+
+    Steps:
+    1. Process raw dataset
+    2. Split by gender
+    3. Run full pipeline for each gender
+    4. Generate final report
+
+    :param df_all: Raw input dataframe loaded from Excel
+    :type df_all: pandas.DataFrame
+
+    :return: Structured results dictionary containing:
+             - Male results
+             - Female results
+             - Global logs
+    :rtype: dict
     """
     # Process initial table
     df_m, df_f, global_logs = process_table(df_all)
@@ -741,7 +958,8 @@ def run_tournament_draw(df_all):
         bins=Config.MASC_BINS,
         labels=Config.MASC_LABELS,
         sex_label=Config.MALE,
-        logs=male_logs
+        logs=male_logs,
+        group_counter=group_counter
     )
 
     # Female pipeline
@@ -750,7 +968,8 @@ def run_tournament_draw(df_all):
         bins=Config.FEM_BINS,
         labels=Config.FEM_LABELS,
         sex_label=Config.FEMALE,
-        logs=female_logs
+        logs=female_logs,
+        group_counter=group_counter
     )
 
     results = {
