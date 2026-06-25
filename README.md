@@ -50,6 +50,8 @@ Input/
 Output/
 Resources/
     Templates/
+        Input_File/
+            Input_Template.xlsx    
         Table/
         *.xlsx templates
 config.py
@@ -77,13 +79,13 @@ STAGE = "B"   # "B" = Benjamins, "I" = Iniciados/Infantis
 * **Tournament identifier**
 
 ```python
-TOURNAMENT_CODE = "FZ_2026"
+TOURNAMENT_CODE = "april_tournament"
 ```
 
 * **Location + date**
 
 ```python
-LOC_DATE = "Coimbra, 2026-04-17"
+LOC_DATE = "Example Location, 17-04-2026"
 ```
 
 * **Number of mats**
@@ -95,6 +97,14 @@ NUMBER_OF_MATS = 5
 ---
 
 # 🚀 How to Run
+
+## Step 0 — Create your Input File
+
+Use the Input file template found under `Resources/Templates/Input_File/`
+1. Copy it into the Input Folder
+2. Change the name of the file
+   * ⚠️ **Important**: The name of your file will affect your `TOURNAMENT_CODE` variable - **Example**: If your file name is `april_tournament.xlsx` then your `TOURNAMENT_CODE` variable has to be `april_tournament`
+3. Fill it with relevant information according to the column names already provided
 
 ## Step 1 — Generate groups (DRAW)
 

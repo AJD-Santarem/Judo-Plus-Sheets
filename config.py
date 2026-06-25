@@ -25,10 +25,9 @@ class Config:
     ORG_NAME = "Associação de Judo do Distrito de Santarém"
     """Name of the organizing entity displayed in reports and PDFs."""
 
-    STAGE = "I"
+    STAGE = "B"
     """
     Tournament stage.
-
     Values:
     - "B" → Benjamins
     - "I" → Iniciados / Infantis

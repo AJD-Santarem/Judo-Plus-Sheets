@@ -27,7 +27,7 @@ def export_markdown_report(results):
     Export a full tournament draw report in Markdown format.
 
     This report includes:
-    - Global metadata
+    - Global metadata and logs
     - Per-gender summaries (Male / Female)
     - Age tier breakdowns
     - Validation logs and warnings
@@ -72,6 +72,19 @@ def export_markdown_report(results):
     lines.append(f"- **Total Athletes Ungrouped:** {overall_ungrouped}")
     lines.append(f"- **Total Athletes Accounted For:** {overall_accounted}")
     lines.append(f"- **Overall Check Passed:** {'Yes' if overall_check else 'No'}")
+    lines.append("")
+
+    global_logs = results["Global"]["logs"]
+
+    lines.append("## Global Validation Logs")
+    lines.append("")
+
+    if not global_logs:
+        lines.append("_No global validation issues._")
+    else:
+        for log_line in global_logs:
+            lines.append(f"- {log_line}")
+
     lines.append("")
 
     # =====================================================
@@ -295,19 +308,28 @@ def process_table(df):
     """
     Clean and normalize raw tournament input data.
 
-    Steps:
+    Processing steps:
     - Normalize column names
-    - Validate gender
+    - Normalize athlete names and club names
+    - Validate gender values
+    - Validate weight values (must be present and numeric)
     - Create AGE_TIER assignments
     - Remove invalid rows
-    - Split into male/female datasets
+    - Split athletes into male and female datasets
 
-    :param df: Raw input dataframe
+    Validation rules:
+    - Athletes with invalid gender values are excluded.
+    - Athletes with missing or non-numeric weights are excluded.
+    - Athletes for whom AGE_TIER cannot be determined are excluded.
+
+    :param df: Raw input dataframe.
     :type df: pandas.DataFrame
 
     :return: Tuple containing:
-             (male_dataframe, female_dataframe, logs)
-    :rtype: tuple[pandas.DataFrame, pandas.DataFrame, list]
+             - male dataframe
+             - female dataframe
+             - processing logs
+    :rtype: tuple[pandas.DataFrame, pandas.DataFrame, list[str]]
     """
     logs = []
 
@@ -320,11 +342,25 @@ def process_table(df):
     df["GENDER"] = df["GENDER"].apply(normalize_gender)
     df["CLUB"] = df["CLUB"].astype(str).str.strip().str.upper()
 
+    # Validate gender
     invalid_gender_mask = df["GENDER"].isna()
     if invalid_gender_mask.any():
         for _, row in df[invalid_gender_mask].iterrows():
             logs.append(f'Athlete "{row["NAME"]}" has an invalid GENDER: {row["GENDER"]}')
         df = df[~invalid_gender_mask].copy()
+
+    # Validate weight
+    df["WEIGHT"] = pd.to_numeric(df["WEIGHT"], errors="coerce")
+
+    invalid_weight_mask = df["WEIGHT"].isna()
+
+    if invalid_weight_mask.any():
+        for _, row in df[invalid_weight_mask].iterrows():
+            logs.append(
+                f'Athlete "{row["NAME"]}" was excluded because WEIGHT is missing or invalid.'
+            )
+
+        df = df[~invalid_weight_mask].copy()
 
     # Create AGE_TIER
     df["AGE_TIER"] = df.apply(lambda row: create_subgroup(row, logs), axis=1)
